@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {seed,apply,space,freeStock,product} from './model.mjs'
+import {seed,apply,space,freeStock,product,rover} from './model.mjs'
 
 test('Hub order: rejection, rerouting, alternate pickup, robot failure, issue and return',()=>{
  const s=seed(),act=(type,data={})=>apply(s,{type,...data})
@@ -22,12 +22,16 @@ test('Hub order: rejection, rerouting, alternate pickup, robot failure, issue an
  act('choice',{order:o.id,accept:false})
  const local=s.requests.at(-1),args={ids:[local.id],robot:'R-01'}
  assert.throws(()=>act('trip',args))
- act('day');act('trip',args)
+ act('day')
+ assert.throws(()=>act('trip',args),/не менее 3/)
+ act('transfer',{product:1,qty:2,place:'p1',to:'p2'})
+ args.ids.push(s.requests.at(-1).id)
+ act('trip',args)
  const t=s.trips[0]
  act('ship',{request:local.id,place:'p1'});assert.equal(product(s,3).stock.p1,0)
  act('failure',{trip:t.id});assert.equal(product(s,3).stock.p1,1)
  act('trip',args);const t2=s.trips.at(-1)
- act('ship',{request:local.id,place:'p1'});apply(s,{type:'receive',request:local.id,place:'p2'},local.eta);assert.equal(t2.status,'Завершён')
+ act('ship',{request:local.id,place:'p1'});apply(s,{type:'receive',request:local.id,place:'p2'},local.eta);const extra=s.requests.at(-1);apply(s,{type:'receive',request:extra.id,place:'p2'},extra.eta);assert.equal(t2.status,'Завершён')
  assert.equal(o.status,'Готов к выдаче');assert.equal(o.loc,'p2')
  act('issue',{order:o.id,place:'p2'})
  assert.throws(()=>act('issue',{order:o.id,place:'p2'}));assert.equal(s.ledger.length,1)
@@ -88,4 +92,20 @@ test('Pickup on full mini-warehouse, parties, time and repeat receipts',()=>{
  assert.deepEqual(space(s,'p2'),{used:12,held:0,pickup:8,free:0})
  act('issue',{order:r.order,place:'p2'})
  assert.equal(space(s,'p2').pickup,0)
+})
+
+test('Rover rejects oversize items and enforces cargo limits',()=>{
+ const s=seed()
+ const trip=(dims,qty)=>{
+  apply(s,{type:'product',name:'Тестовая упаковка',category:'Дом',dims,qty,price:100,place:'p1'})
+  apply(s,{type:'transfer',product:s.products.at(-1).id,qty,place:'p1',to:'p2'})
+  apply(s,{type:'trip',ids:[s.requests.at(-1).id],robot:'R-01'})
+ }
+ // Give the fixture sufficient storage at both pickup offices.
+ for(const id of ['p1','p2'])apply(s,{type:'capacity',place:id,value:1500})
+ assert.equal(rover.liters,375.584)
+ assert.throws(()=>trip([89,1,1],3),/не помещается/)
+ assert.throws(()=>trip([55,55,55],3),/Общий объём/)
+ trip([55,88,77.6/3],3)
+ assert.equal(s.trips.length,1)
 })

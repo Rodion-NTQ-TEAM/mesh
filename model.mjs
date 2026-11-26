@@ -1,5 +1,15 @@
 export const categories = ['Электроника','Дом','Аксессуары']
 export const stages = ['Погрузка','В пути','Разгрузка','Завершён']
+const cargoDimensions = [88, 55, 77.6]
+export const rover = {
+  dimensions: cargoDimensions,
+  liters: packingLiters(cargoDimensions),
+  minUnits: 3,
+  idealMin: 8,
+  idealMax: 14
+}
+const sortedCargoDimensions = [...cargoDimensions].sort((a,b)=>a-b)
+
 export function seed(){
   const places = [
     ['hub','Распределительный хаб','Казань',0,0,100000],
@@ -160,7 +170,14 @@ export function apply(s,a,now=Date.now()){
 function prepareTrip(s,a,rows){
    check(rows.length&&rows.every(r=>r.kind==='Робот'&&r.status==='Новая'&&r.from===rows[0].from),'Выберите новые заявки из одного ПВЗ')
    const qty=rows.reduce((n,r)=>n+r.qty,0)
-   check((qty>=3||rows.some(r=>s.day>r.created))&&volume(s,rows)<=80,'Отправление от 3 упаковок или после суток ожидания, максимум 80 л')
+   check(qty >= rover.minUnits, 'Для рейса нужно не менее '+rover.minUnits+' упаковок')
+   check(volume(s,rows) <= rover.liters + 1e-8, 'Общий объём груза превышает '+rover.liters+' л')
+   // ponytail: individual fit and total volume are checked; mixed-box packing needs a 3D solver.
+   for (const row of rows) {
+     const item = product(s,row.product)
+     check([...item.dims].sort((a,b)=>a-b).every((size,index)=>size<=sortedCargoDimensions[index]),
+       'Упаковка не помещается в багажник: '+item.name)
+   }
    check(['R-01','R-02'].includes(a.robot)&&!s.trips.some(t=>t.robot===a.robot&&!['Сбой','Завершён'].includes(t.status)),'Робот занят')
    const stops=[...new Set(rows.map(r=>r.to))],route=[rows[0].from]
    for(const id of stops)check(space(s,id).free>=volume(s,rows.filter(r=>r.to===id&&r.purpose!=='pickup')),'Нет места в пункте назначения')
